@@ -5,19 +5,20 @@ import { Animated, Button, StyleSheet, Text, TouchableOpacity, View } from 'reac
 import * as FileSystem from 'expo-file-system';
 import * as ImageManipulator from 'expo-image-manipulator';
 import OpenAI from 'openai';
+import * as Speech from 'expo-speech';
 
 
 export default function App() {
   const [facing, setFacing] = useState('back');
   const [permission, requestPermission] = useCameraPermissions();
   const [cameraRef, setCameraRef] = useState(null);
-  const scaleValue = useRef (new Animated.Value(1)).current;
+  const scaleValue = useRef(new Animated.Value(1)).current;
+  const rotateValue = useRef(new Animated.Value(0)).current;
   const [b64, setB64] = useState('');
   const [description, setDescription] = useState('');
 
-  useEffect(() => {
+  useEffect(async () => {
     requestPermission();
-    console.log("EVEGO", process.env.EXPO_PUBLIC_OPENAI_API_KEY)
   }, []);
 
   if (!permission) {
@@ -25,12 +26,12 @@ export default function App() {
     return <View />;
   }
 
-  if (!permission.granted) {
+  if (permission.granted) {
     // Camera permissions are not granted yet.
     return (
       <View style={styles.container}>
         <Text style={{ textAlign: 'center' }}>We need your permission to show the camera</Text>
-        <Button onPress={requestPermission} title="grant permission" />
+        <Button onPress={requestPermission} title="Allow" />
       </View>
     );
   }
@@ -58,14 +59,11 @@ export default function App() {
         console.log(`Photo URI: ${photo.uri}`);
 
         const resizedImage = await resizeAndCompressImage(photo.uri);
-        // console.log("resizedImage", resizedImage)
         const imageUriBase64 = await convertImageToBase64(resizedImage.uri);
-        // console.log("imageUriBase64", imageUriBase64)
         setB64(imageUriBase64);
 
-        // Send imageUriBase64 to OpenAI API or process as needed
         const description = await describeImageWithOpenAI(imageUriBase64);
-        setDescription(`Description: ${description}`);
+        speakDescription();
 
       } catch (error) {
         console.error('Error in takePicture function:', error);
@@ -96,11 +94,10 @@ const describeImageWithOpenAI = async (base64Image) => {
   };
 
   const url = 'https://api.openai.com/v1/chat/completions';
-  setDescription('Sending request to OpenAI...');
+
   const result = await postData(url, params);
 
   const displayText = result.choices[0].message.content;
-  console.log("RESULT", result.choices[0].message)
   setDescription(displayText)
 }
 
@@ -115,6 +112,28 @@ const postData = async (url, data) => {
   });
 
   return await response.json(); 
+};
+
+const startLoadingAnimation = () => {
+  Animated.loop(
+    Animated.timing(rotateValue, {
+      toValue: 1,
+      duration: 1000,
+      useNativeDriver: true,
+    })
+  ).start();
+};
+
+const stopLoadingAnimation = () => {
+  rotateValue.setValue(0);
+};
+
+const speakDescription = () => {
+  startLoadingAnimation();
+  Speech.speak(description, {
+    onDone: stopLoadingAnimation,
+    onError: stopLoadingAnimation,
+  });
 };
 
   const animateButton = () => {
@@ -142,8 +161,20 @@ const postData = async (url, data) => {
               takePicture();
             }}
           >
-            <Animated.View style={{ transform: [{ scale: scaleValue }] }}>
-              <Entypo name="eye" size={64} color="white" />
+          <Animated.View
+              style={{
+                transform: [
+                  { scale: scaleValue },
+                  {
+                    rotate: rotateValue.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: ['0deg', '360deg'],
+                    }),
+                  },
+                ],
+              }}
+            >              
+            <Entypo name="eye" size={64} color="white" />
             </Animated.View>
           </TouchableOpacity>
         </View>
