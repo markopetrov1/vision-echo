@@ -1,7 +1,7 @@
 import { Entypo } from '@expo/vector-icons';
 import { Camera, CameraView, useCameraPermissions } from 'expo-camera';
 import { useEffect, useRef, useState } from 'react';
-import { Animated, Button, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Animated, Button, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import * as FileSystem from 'expo-file-system';
 import * as ImageManipulator from 'expo-image-manipulator';
 import OpenAI from 'openai';
@@ -15,18 +15,47 @@ export default function App() {
   const scaleValue = useRef(new Animated.Value(1)).current;
   const rotateValue = useRef(new Animated.Value(0)).current;
   const [b64, setB64] = useState('');
-  const [description, setDescription] = useState('');
+  const [showWelcome, setShowWelcome] = useState(true);
+  const fadeInValue = useRef(new Animated.Value(0)).current;
+  const [welcomeText, setWelcomeText] = useState(''); 
+  const [finishedSpeaking, setFinishedSpeaking] = useState(false);
+ const welcomeMessage = "Welcome to VisionEcho, where we empower vision through audio.";
+  const tapMessage = "Tap anywhere to continue.";
 
-  useEffect(async () => {
+  useEffect(() => {
     requestPermission();
+    Animated.timing(fadeInValue, {
+      toValue: 1,
+      duration: 1500,
+      useNativeDriver: true,
+    }).start(() => {
+      setTimeout(playWelcomeMessage, 1000);
+    });
   }, []);
+
+  const playWelcomeMessage = () => {
+    let currentText = '';
+    Speech.speak(welcomeMessage, {
+      onDone: () => {
+        setTimeout(() => {
+          Speech.speak(tapMessage, {
+            onDone: () => setFinishedSpeaking(true),
+          });
+        }, 1000); // Delay before the second part
+      },
+      onBoundary: ({ charIndex }) => {
+        currentText = welcomeMessage.substring(0, charIndex);
+        setWelcomeText(currentText);
+      },
+    });
+  };
 
   if (!permission) {
     // Camera permissions are still loading.
     return <View />;
   }
 
-  if (permission.granted) {
+  if (!permission.granted) {
     // Camera permissions are not granted yet.
     return (
       <View style={styles.container}>
@@ -35,6 +64,25 @@ export default function App() {
       </View>
     );
   }
+
+  if (showWelcome) {
+    return (
+      <Animated.View style={[styles.welcomeContainer, { opacity: fadeInValue }]} onTouchEnd={() => {
+        if(finishedSpeaking){
+          setShowWelcome(false)
+        }
+      }}>
+        <View style={styles.welcomeAnimationContainer}>
+        <Image
+          source={require("./assets/logo-no-background.png")}
+          style={{ borderRadius: 50, width: 300, height: 300 }}
+        />
+        </View>
+        <Text style={styles.welcomeText}>Tap anywhere to continue</Text>
+      </Animated.View>
+    );
+  }
+
 
   function toggleCameraFacing() {
     setFacing(current => (current === 'back' ? 'front' : 'back'));
@@ -56,14 +104,13 @@ export default function App() {
   const takePicture = async () => {
       try {
         const photo = await cameraRef.takePictureAsync();
-        console.log(`Photo URI: ${photo.uri}`);
 
         const resizedImage = await resizeAndCompressImage(photo.uri);
         const imageUriBase64 = await convertImageToBase64(resizedImage.uri);
         setB64(imageUriBase64);
 
         const description = await describeImageWithOpenAI(imageUriBase64);
-        speakDescription();
+        speakDescription(description);
 
       } catch (error) {
         console.error('Error in takePicture function:', error);
@@ -98,7 +145,8 @@ const describeImageWithOpenAI = async (base64Image) => {
   const result = await postData(url, params);
 
   const displayText = result.choices[0].message.content;
-  setDescription(displayText)
+  
+  return displayText;
 }
 
 const postData = async (url, data) => {
@@ -128,7 +176,7 @@ const stopLoadingAnimation = () => {
   rotateValue.setValue(0);
 };
 
-const speakDescription = () => {
+const speakDescription = (description) => {
   startLoadingAnimation();
   Speech.speak(description, {
     onDone: stopLoadingAnimation,
@@ -208,4 +256,25 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: 'white',
   },
+  welcomeContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#FFE9E4',
+  },
+  welcomeAnimationContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+  },
+  welcomeAnimation: {
+    width: 300,
+    height: 400,
+    alignSelf: 'flex-end',
+    marginBottom: 10,
+  },
+  welcomeText: {
+    fontSize: 18,
+    color: '#a61613',
+    marginTop: 50
+  }
 });
