@@ -1,18 +1,26 @@
 import { Entypo } from '@expo/vector-icons';
 import { Camera, CameraView, useCameraPermissions } from 'expo-camera';
-import { useRef, useState } from 'react';
-import { Animated, TouchableOpacity, View, StyleSheet } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Animated, TouchableOpacity, View, StyleSheet, Image } from 'react-native';
 import * as FileSystem from 'expo-file-system';
 import * as ImageManipulator from 'expo-image-manipulator';
 import OpenAI from 'openai';
 import * as Speech from 'expo-speech';
+import LottieView from 'lottie-react-native';
+import { FontAwesome } from '@expo/vector-icons';
+
 
 export const CameraScreen = () => {
     const [cameraRef, setCameraRef] = useState(null);
     const scaleValue = useRef(new Animated.Value(1)).current;
+    const fadeOutValue = useRef(new Animated.Value(1)).current;
     const rotateValue = useRef(new Animated.Value(0)).current;
+    const microphoneScale = useRef(new Animated.Value(1)).current;
     const [b64, setB64] = useState('');
     const [facing, setFacing] = useState('back');
+    const [capturedPhoto, setCapturedPhoto] = useState(null);
+    const [loading, setLoading] = useState(false);
+    const [speaking, setSpeaking] = useState(false);
 
   function toggleCameraFacing() {
     setFacing(current => (current === 'back' ? 'front' : 'back'));
@@ -26,23 +34,48 @@ export const CameraScreen = () => {
     );
   };
 
+  useEffect(() => {
+    animateMicrophone();
+  }, []);
+
+  const animateMicrophone = () => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(microphoneScale, {
+          toValue: 1.5,
+          duration: 500,
+          useNativeDriver: true,
+        }),
+        Animated.timing(microphoneScale, {
+          toValue: 1,
+          duration: 500,
+          useNativeDriver: true,
+        }),
+      ])
+    ).start();
+  };
+
   const convertImageToBase64 = async (uri) => {
     return await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
   };
 
   const takePicture = async () => {
       try {
+        setLoading(true);
         const photo = await cameraRef.takePictureAsync();
 
+        setCapturedPhoto(photo.uri); 
         const resizedImage = await resizeAndCompressImage(photo.uri);
         const imageUriBase64 = await convertImageToBase64(resizedImage.uri);
         setB64(imageUriBase64);
 
         const description = await describeImageWithOpenAI(imageUriBase64);
+        setLoading(false);
         speakDescription(description);
 
       } catch (error) {
         console.error('Error in takePicture function:', error);
+        setLoading(false);
       }
   };
 
@@ -56,7 +89,7 @@ const describeImageWithOpenAI = async (base64Image) => {
         content: [
           {
             type: 'text',
-            text: `What is in this image? Please describe me as i'm visually impaired person.`,
+            text: `What is in this image? Please describe me as i'm visually impaired person. Give me a short description.`,
           },
           {
             type: 'image_url',
@@ -106,10 +139,26 @@ const stopLoadingAnimation = () => {
 };
 
 const speakDescription = (description) => {
+  setSpeaking(true);
   startLoadingAnimation();
   Speech.speak(description, {
-    onDone: stopLoadingAnimation,
-    onError: stopLoadingAnimation,
+    onDone: () => {
+      stopLoadingAnimation();
+      setTimeout(() => {
+        Animated.timing(fadeOutValue, {
+          toValue: 0,
+          duration: 1000,
+          useNativeDriver: true,
+        }).start(() => {
+          setCapturedPhoto(null)
+          setSpeaking(false);
+        });
+      }, 1000); // Wait 1 second before fading out the image
+    },
+    onError: () => {
+      setSpeaking(false);
+      stopLoadingAnimation();
+    },
   });
 };
 
@@ -130,8 +179,35 @@ const speakDescription = (description) => {
 
     return (
     <View style={styles.container}>
+      {
+        loading && (
+          <View style={styles.overlay}>
+            <LottieView
+              source={require('../assets/animations/loading-lottie.json')}
+              autoPlay
+              loop
+              style={styles.lottie}
+            />
+          </View>
+        )
+      }
+      {
+        speaking && (
+        <View style={styles.overlay}>
+          <Animated.View style={{ transform: [{ scale: microphoneScale }] }}>
+           <View style={{ backgroundColor: "#f57f51", borderRadius: 70 }}>
+             <FontAwesome style={{ padding: 30, paddingHorizontal: 40 }} name="microphone" size={50} color="#fff" />
+           </View>
+          </Animated.View>
+         </View>
+        )
+      }
+      
       <CameraView style={styles.camera} facing={facing} ref={(ref) => setCameraRef(ref)}>
-      <View style={styles.buttonContainer}>
+      {
+      capturedPhoto ? <Image source={{ uri: capturedPhoto }} style={styles.capturedImage} />
+      : 
+        <View style={styles.buttonContainer}>
           <TouchableOpacity
             style={styles.button}
             onPress={() => {
@@ -156,6 +232,7 @@ const speakDescription = (description) => {
             </Animated.View>
           </TouchableOpacity>
         </View>
+        }
       </CameraView>
     </View>
     )
@@ -186,5 +263,24 @@ const styles = StyleSheet.create({
       fontSize: 24,
       fontWeight: 'bold',
       color: 'white',
-    }
+    },
+    capturedImage: {
+      flex: 1,
+      width: '100%',
+    },
+    overlay: {
+      position: 'absolute',
+      top: 0,
+      bottom: 0,
+      left: 0,
+      right: 0,
+      justifyContent: 'center',
+      alignItems: 'center',
+      zIndex: 100,
+      backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    },
+    lottie: {
+      width: 500,
+      height: 500,
+    },
   });
